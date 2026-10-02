@@ -1,6 +1,8 @@
+import io
 import os
 import stat
 import sys
+import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -77,8 +79,69 @@ class TestArchive(unittest.TestCase):
                     filepath = os.path.join(tmpdir, "no_permissions")
                     self.assertEqual(os.stat(filepath).st_mode & mask, 0o666 & ~umask)
 
+    @unittest.skipIf(
+        sys.platform == "win32", "Python on Windows has a limited os.chmod()."
+    )
+    def test_extract_special_permission_bits(self):
+        """
+        archive.extract() doesn't apply the setuid, setgid, and sticky bits.
+        """
+        modes = {
+            "setuid": stat.S_ISUID | 0o755,
+            "setgid": stat.S_ISGID | 0o755,
+            "sticky": stat.S_ISVTX | 0o755,
+            "regular": 0o644,
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tar_path = os.path.join(tmpdir, "special_bits.tar")
+            with tarfile.open(tar_path, "w") as tar:
+                for name, mode in modes.items():
+                    member = tarfile.TarInfo(name)
+                    member.mode = mode
+                    member.size = 1
+                    tar.addfile(member, io.BytesIO(b"x"))
+            zip_path = os.path.join(tmpdir, "special_bits.zip")
+            with zipfile.ZipFile(zip_path, "w") as zf:
+                for name, mode in modes.items():
+                    info = zipfile.ZipInfo(name)
+                    info.external_attr = (stat.S_IFREG | mode) << 16
+                    zf.writestr(info, b"x")
+            for archive_path in (tar_path, zip_path):
+                with self.subTest(os.path.basename(archive_path)):
+                    extract_dir = archive_path + "_extracted"
+                    os.mkdir(extract_dir)
+                    archive.extract(archive_path, extract_dir)
+                    for name, mode in modes.items():
+                        filepath = os.path.join(extract_dir, name)
+                        self.assertEqual(
+                            stat.S_IMODE(os.stat(filepath).st_mode), mode & 0o777
+                        )
+
 
 class TestArchiveInvalid(SimpleTestCase):
+    def test_extract_function_special_files(self):
+        tests = [
+            ("fifo", tarfile.FIFOTYPE),
+            ("chr", tarfile.CHRTYPE),
+            ("blk", tarfile.BLKTYPE),
+        ]
+        msg = "Archive contains special file: '%s'"
+        for name, member_type in tests:
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmpdir:
+                tar_path = os.path.join(tmpdir, "special_file.tar")
+                with tarfile.open(tar_path, "w") as tar:
+                    member = tarfile.TarInfo(name)
+                    member.type = member_type
+                    tar.addfile(member)
+                    member = tarfile.TarInfo("regular")
+                    member.size = 1
+                    tar.addfile(member, io.BytesIO(b"x"))
+                extract_dir = os.path.join(tmpdir, "extracted")
+                os.mkdir(extract_dir)
+                with self.assertRaisesMessage(SuspiciousOperation, msg % name):
+                    archive.extract(tar_path, extract_dir)
+                self.assertEqual(os.listdir(extract_dir), [])
+
     def test_extract_function_traversal(self):
         archives_dir = os.path.join(os.path.dirname(__file__), "traversal_archives")
         tests = [

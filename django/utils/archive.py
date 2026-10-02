@@ -109,9 +109,11 @@ class BaseArchive:
         """
         If the file in the archive has some permissions (this assumes a file
         won't be writable/executable without being readable), apply those
-        permissions to the unarchived file.
+        permissions to the unarchived file. The setuid, setgid, and sticky
+        bits are never applied.
         """
         if mode & stat.S_IROTH:
+            mode = stat.S_IMODE(mode) & ~(stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX)
             os.chmod(filename, mode)
 
     def split_leading_dir(self, path):
@@ -182,6 +184,11 @@ class TarArchive(BaseArchive):
             if member.isdir():
                 if filename:
                     os.makedirs(filename, exist_ok=True)
+            elif not (member.isfile() or member.issym() or member.islnk()):
+                # Character/block devices, FIFOs, and other special files.
+                raise SuspiciousOperation(
+                    "Archive contains special file: '%s'" % member.name
+                )
             else:
                 try:
                     extracted = self._archive.extractfile(member)

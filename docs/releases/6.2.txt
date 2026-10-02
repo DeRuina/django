@@ -383,6 +383,11 @@ Miscellaneous
   database connections used during error handling are managed by
   ``close_old_connections()``.
 
+* The :djadmin:`startapp` and :djadmin:`startproject` commands no longer apply
+  the setuid, setgid, and sticky bits of files in ``--template`` archives, and
+  now raise :exc:`~django.core.exceptions.SuspiciousOperation` for tar archives
+  containing special files, such as named pipes or device nodes.
+
 .. _deprecated-features-6.2:
 
 Features deprecated in 6.2

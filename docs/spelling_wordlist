@@ -450,6 +450,8 @@ semiminor
 serializability
 serializer
 serializers
+setgid
+setuid
 shapefile
 shapefiles
 sharding
